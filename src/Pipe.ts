@@ -1,10 +1,21 @@
 
+type PipeListener<T> = (origin: Pipe<T>) => void;
+
 export interface Pipe<T> {
+    /** Returns the pipe's current value. */
     get value(): T;
-    subscribe(listener: (source: Pipe<T>) => void): number;
+
+    /** Subscribe to this pipe. Returns an unsubscribe token. */
+    subscribe(listener: PipeListener<T>): number;
+
+    /** Unsubscribe with a token a call to subscribe returned. */
     unsubscribe(token: number): void;
+
+    /** Unsubscribes listeners. Do not use a disposed object. The behavior of a disposed object is undefined. */
     dispose(): void;
 }
+
+interface PipeBase<T> extends Pipe<T> { }
 
 abstract class PipeBase<T> implements Pipe<T> {
     private _index = 0;
@@ -31,7 +42,6 @@ abstract class PipeBase<T> implements Pipe<T> {
         delete this._listeners[token];
     }
 
-    /** Unsubscribes listeners, and causing future calls the throw. */
     dispose() {
         for (let i = 0; i < this._index; i++) {
             this.unsubscribe(i);
@@ -40,11 +50,9 @@ abstract class PipeBase<T> implements Pipe<T> {
     }
 }
 
-interface PipeBase<T> extends Pipe<T> { }
-
 export const PipeConstructor = PipeBase;
 
-export class State<T> extends PipeBase<T> implements Pipe<T> {
+export class State<T> extends PipeBase<T> {
     private _oldValue: T;
     private _value: T;
 
@@ -70,7 +78,7 @@ export class State<T> extends PipeBase<T> implements Pipe<T> {
     }
 }
 
-class MappedPipe<TStart, TEnd> extends PipeBase<TEnd> implements Pipe<TEnd> {
+class MappedPipe<TStart, TEnd> extends PipeBase<TEnd> {
     private _cached: boolean = false;
     private _cache?: TEnd;
     private _tokens: { [token: number]: number; } = {};
@@ -119,7 +127,7 @@ class MappedPipe<TStart, TEnd> extends PipeBase<TEnd> implements Pipe<TEnd> {
     }
 }
 
-export class CombinedPipe extends PipeBase<Pipe<any>[]> implements Pipe<Pipe<any>[]> {
+export class CombinedPipe extends PipeBase<Pipe<any>[]> {
     private _cached: boolean = false;
     private _cache?: any[];
     private _dependencyTokens: { [token: number]: number[]; } = {};
@@ -173,6 +181,8 @@ export class CombinedPipe extends PipeBase<Pipe<any>[]> implements Pipe<Pipe<any
         super.unsubscribe(token);
     }
 }
+
+// Extension methods
 
 export interface Pipe<T> {
     combineWith<T1>(this: Pipe<T>, t1: Pipe<T1>): Pipe<[Pipe<T>, Pipe<T1>]>;
