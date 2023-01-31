@@ -6,7 +6,7 @@ export interface Pipe<T> {
     dispose(): void;
 }
 
-export abstract class PipeBase<T> implements Pipe<T> {
+abstract class PipeBase<T> implements Pipe<T> {
     private _index = 0;
     private _listeners: ((source: Pipe<T>) => void)[] = [];
 
@@ -39,7 +39,11 @@ export abstract class PipeBase<T> implements Pipe<T> {
         this._listeners = undefined!;
     }
 }
-export interface PipeBase<T> extends Pipe<T> { }
+
+interface PipeBase<T> extends Pipe<T> { }
+
+export const PipeConstructor = PipeBase;
+
 export class State<T> extends PipeBase<T> implements Pipe<T> {
     private _oldValue: T;
     private _value: T;
@@ -65,6 +69,7 @@ export class State<T> extends PipeBase<T> implements Pipe<T> {
         }
     }
 }
+
 class MappedPipe<TStart, TEnd> extends PipeBase<TEnd> implements Pipe<TEnd> {
     private _cached: boolean = false;
     private _cache?: TEnd;
@@ -113,6 +118,7 @@ class MappedPipe<TStart, TEnd> extends PipeBase<TEnd> implements Pipe<TEnd> {
         super.unsubscribe(token);
     }
 }
+
 export class CombinedPipe extends PipeBase<Pipe<any>[]> implements Pipe<Pipe<any>[]> {
     private _cached: boolean = false;
     private _cache?: any[];
@@ -169,12 +175,17 @@ export class CombinedPipe extends PipeBase<Pipe<any>[]> implements Pipe<Pipe<any
 }
 
 export interface Pipe<T> {
-    combineWith(this: Pipe<any>, ...additaionalDependencies: Pipe<any>[]): Pipe<Pipe<any>[]>;
+    combineWith<T1>(this: Pipe<T>, t1: Pipe<T1>): Pipe<[Pipe<T>, Pipe<T1>]>;
+    combineWith<T1, T2>(this: Pipe<T>, t1: Pipe<T1>, t2: Pipe<T2>): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>]>;
+    combineWith(this: Pipe<T>, ...more: Pipe<any>[]): Pipe<[Pipe<T>, ...Pipe<any>[]]>;
+}
+PipeBase.prototype.combineWith = function <T>(this: Pipe<T>) {
+    return new CombinedPipe(this, ...arguments) as any;
+};
+
+export interface Pipe<T> {
     map<TEnd>(this: Pipe<T>, projection: (value: T) => TEnd): Pipe<TEnd>;
 }
-PipeBase.prototype.combineWith = function <T>(this: Pipe<T>, ...additaionalDependencies: Pipe<any>[]): Pipe<Pipe<any>[]> {
-    return new CombinedPipe(this, ...additaionalDependencies);
-};
 PipeBase.prototype.map = function <T, TEnd>(this: Pipe<T>, projection: (value: T) => TEnd): Pipe<TEnd> {
     return new MappedPipe<T, TEnd>(this, projection);
 };

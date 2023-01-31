@@ -1,6 +1,7 @@
-import { Pipe, PipeBase } from "./Pipe";
+import { Pipe, PipeConstructor } from "./Pipe";
 
 type Elemental = string | number | Node;
+
 const appendElementalPipe = function (parent: ParentNode, elementalPipe: Pipe<Elemental>) {
     const start = document.createComment('');
     parent.append(start);
@@ -9,7 +10,7 @@ const appendElementalPipe = function (parent: ParentNode, elementalPipe: Pipe<El
     start.after(end);
 
     const elementalValue = elementalPipe.value;
-    if (elementalValue instanceof PipeBase) {
+    if (elementalValue instanceof PipeConstructor) {
         // First render
         const node = n(elementalValue.value);
         start.after(node);
@@ -18,13 +19,13 @@ const appendElementalPipe = function (parent: ParentNode, elementalPipe: Pipe<El
         const map = elementalPipe.map(n);
         map.subscribe(pn => {
             for (let next = start.nextSibling; next && next != end; next = start.nextSibling) {
-                next.dispatchEvent(new CustomEvent('removing', { detail: { currentTarget: next! } }));
+                next.dispatchEvent(new CustomEvent('dispose', { detail: { currentTarget: next! } }));
                 next.remove();
             }
             start.after(pn.value);
         });
         // Clean up will parent is removed
-        parent.addEventListener('removing', _ => map.dispose());
+        parent.addEventListener('dispose', _ => map.dispose());
     }
     else {
         // First render
@@ -35,24 +36,24 @@ const appendElementalPipe = function (parent: ParentNode, elementalPipe: Pipe<El
         const map = elementalPipe.map(n);
         map.subscribe(pn => {
             for (let next = start.nextSibling; next && next != end; next = start.nextSibling) {
-                next.dispatchEvent(new CustomEvent('removing', { detail: { currentTarget: next! } }));
+                next.dispatchEvent(new CustomEvent('dispose', { detail: { currentTarget: next! } }));
                 next.remove();
             }
             start.after(pn.value);
         });
         // Clean up will parent is removed
-        parent.addEventListener('removing', _ => map.dispose());
+        parent.addEventListener('dispose', _ => map.dispose());
     }
 
     return start;
 };
-export function appendNode(parent: ParentNode, value: Promise<Elemental> | PipeBase<Elemental> | (() => (Elemental | Promise<Elemental>)) | Elemental) {
+export function appendNode(parent: ParentNode, value: Promise<Elemental> | Pipe<Elemental> | (() => (Elemental | Promise<Elemental>)) | Elemental) {
     if (value instanceof Promise) {
         const placeholder = document.createComment('');
         parent.append(placeholder);
         value.then(promiseResult => placeholder.replaceWith(n(promiseResult)));
     }
-    else if (value instanceof PipeBase) {
+    else if (value instanceof PipeConstructor) {
         appendElementalPipe(parent, value);
     }
     else if (typeof value === 'function') {
@@ -60,7 +61,7 @@ export function appendNode(parent: ParentNode, value: Promise<Elemental> | PipeB
         appendNode(parent, result);
     }
     else {
-        const node = n(value);
+        const node = n(value as Elemental);
         parent.append(node);
     }
 }
@@ -70,7 +71,7 @@ export function h<TagName extends keyof HTMLElementTagNameMap>(
     const parent = document.createElement(tagName);
 
     for (const child of children) {
-        appendNode(parent, child as PipeBase<Elemental>);
+        appendNode(parent, child);
     }
 
     return parent;
