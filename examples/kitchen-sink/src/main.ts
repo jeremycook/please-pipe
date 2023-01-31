@@ -1,5 +1,5 @@
 import { appendNode, h, n } from './h';
-import { State, CombinedPipe, Pipe } from '../../../src/Pipe';
+import { State, Pipe } from '../../../src/Pipe';
 import './style.css'
 
 async function App() {
@@ -10,7 +10,7 @@ async function App() {
     const count2 = new State(0);
     setInterval(() => count2.value = (count2.value % 100) + .06, 10);
 
-    const mul = new CombinedPipe(count1, count2).map(x => x[0].value * x[1].value);
+    const mul = count1.combineWith(count2).map(([c1, c2]) => c1.value * c2.value);
 
     const time = new State(new Date());
     setInterval(() => time.value = new Date(), 1000);
@@ -34,7 +34,7 @@ async function App() {
         'Hello ', h('strong', 'Bob'), '! ',
         h('strong', count1.map(v => Math.round(v))), ' x ', h('strong', count2.map(v => Math.round(v))), ' = ', h('strong', mul.map(v => Math.round(v))), '. ',
         h('p', 'Local time is ', h('strong', time.combineWith(tickTock).map(([date, tickTock]) => tickTock.value ? date.value.toLocaleTimeString() : date.value.toLocaleTimeString().replaceAll(':', ' ')))),
-        h('p', 'Remote time is ', remoteTime.map(rt => rt.toLocaleTimeString())),
+        h('p', 'Server time is ', remoteTime.map(rt => rt.toLocaleTimeString())),
         h('p', 'A local promise: ', new Promise<Node>(resolve => setTimeout(() => resolve(n('Hi!')), 2000))),
         h('div', () => {
             const canvas = h('canvas');
