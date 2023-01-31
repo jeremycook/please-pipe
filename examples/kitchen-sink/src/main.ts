@@ -1,5 +1,5 @@
 import { appendNode, h, n } from './h';
-import { State, CombinedPipe, Pipe } from './Pipe';
+import { State, CombinedPipe, Pipe } from '../../../src/Pipe';
 import './style.css'
 
 async function App() {
@@ -17,8 +17,14 @@ async function App() {
     const tickTock = time.map(x => x.getSeconds() % 2 === 0);
 
     async function fetchRemoteDate(): Promise<Date> {
-        const data = await (await fetch('http://worldtimeapi.org/api/timezone/America/Denver')).json();
-        return new Date(data.datetime);
+        try {
+            const data = await (await fetch('http://worldtimeapi.org/api/timezone/America/Denver')).json();
+            return new Date(data.datetime);
+        }
+        catch (err) {
+            console.error('fetchRemoteDate', err);
+            return new Date();
+        }
     }
     const remoteTime = new State<Date>(await fetchRemoteDate());
     setInterval(async () => remoteTime.value = await fetchRemoteDate(), 10000);

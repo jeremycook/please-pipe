@@ -12,13 +12,16 @@
     "resolveJsonModule": true,
     "isolatedModules": true,
     "esModuleInterop": true,
-    "noEmit": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // Project references settings
+    "composite": true,
+    "noEmit": false,
+    "outDir": "dist",
   },
   "include": [
     "src"
-  ]
+, "index.ts"  ]
 }

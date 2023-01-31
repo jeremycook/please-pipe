@@ -1,22 +1,22 @@
-import { Pipe, PipeConstructor } from "./Pipe";
+import { Pipe, PipeConstructor } from '../../../src/Pipe';
 
 type Elemental = string | number | Node;
 
-const appendElementalPipe = function (parent: ParentNode, elementalPipe: Pipe<Elemental>) {
+const appendPipe = function (parent: ParentNode, pipe: Pipe<string | number | Node>) {
     const start = document.createComment('');
     parent.append(start);
 
     const end = document.createComment('');
     start.after(end);
 
-    const elementalValue = elementalPipe.value;
-    if (elementalValue instanceof PipeConstructor) {
+    const pipeValue = pipe.value;
+    if (pipeValue instanceof PipeConstructor) {
         // First render
-        const node = n(elementalValue.value);
+        const node = n(pipeValue.value);
         start.after(node);
 
         // Rerendering
-        const map = elementalPipe.map(n);
+        const map = pipe.map(n);
         map.subscribe(pn => {
             for (let next = start.nextSibling; next && next != end; next = start.nextSibling) {
                 next.dispatchEvent(new CustomEvent('dispose', { detail: { currentTarget: next! } }));
@@ -29,11 +29,11 @@ const appendElementalPipe = function (parent: ParentNode, elementalPipe: Pipe<El
     }
     else {
         // First render
-        const node = n(elementalValue);
+        const node = n(pipeValue);
         start.after(node);
 
         // Rerendering
-        const map = elementalPipe.map(n);
+        const map = pipe.map(n);
         map.subscribe(pn => {
             for (let next = start.nextSibling; next && next != end; next = start.nextSibling) {
                 next.dispatchEvent(new CustomEvent('dispose', { detail: { currentTarget: next! } }));
@@ -46,28 +46,30 @@ const appendElementalPipe = function (parent: ParentNode, elementalPipe: Pipe<El
     }
 
     return start;
-};
-export function appendNode(parent: ParentNode, value: Promise<Elemental> | Pipe<Elemental> | (() => (Elemental | Promise<Elemental>)) | Elemental) {
-    if (value instanceof Promise) {
+}
+
+export function appendNode(parent: ParentNode, child: Promise<Elemental> | Pipe<Elemental> | (() => (Elemental | Promise<Elemental>)) | Elemental) {
+    if (child instanceof Promise) {
         const placeholder = document.createComment('');
         parent.append(placeholder);
-        value.then(promiseResult => placeholder.replaceWith(n(promiseResult)));
+        child.then(promiseResult => placeholder.replaceWith(n(promiseResult)));
     }
-    else if (value instanceof PipeConstructor) {
-        appendElementalPipe(parent, value);
+    else if (child instanceof PipeConstructor) {
+        appendPipe(parent, child);
     }
-    else if (typeof value === 'function') {
-        const result = value();
+    else if (typeof child === 'function') {
+        const result = child();
         appendNode(parent, result);
     }
     else {
-        const node = n(value as Elemental);
+        const node = n(child as Elemental);
         parent.append(node);
     }
 }
+
 export function h<TagName extends keyof HTMLElementTagNameMap>(
     tagName: TagName,
-    ...children: (Elemental | Pipe<Elemental> | Promise<Elemental> | (() => (Elemental | Promise<Elemental>)))[]): HTMLElementTagNameMap[TagName] {
+    ...children: (string | number | Node | Pipe<Elemental> | Promise<Elemental> | (() => (Elemental | Promise<Elemental>)))[]): HTMLElementTagNameMap[TagName] {
     const parent = document.createElement(tagName);
 
     for (const child of children) {
@@ -76,17 +78,17 @@ export function h<TagName extends keyof HTMLElementTagNameMap>(
 
     return parent;
 }
-export function n(value: Elemental) {
+
+export function n(value: string | number | Node) {
     if (value instanceof Node) {
         return value;
     }
-    else
-        switch (typeof value) {
-            case 'string':
-                return document.createTextNode(value);
-            case 'number':
-                return document.createTextNode(value.toString());
-            default:
-                throw { message: 'Converting {value} into a Node is not supported.', value, typeof: typeof value };
-        }
+    else switch (typeof value) {
+        case 'string':
+            return document.createTextNode(value);
+        case 'number':
+            return document.createTextNode(value.toString());
+        default:
+            throw { message: 'Converting {value} into a Node is not supported.', value, typeof: typeof value };
+    }
 }
