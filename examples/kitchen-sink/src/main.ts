@@ -32,7 +32,7 @@ async function App() {
     const fragment = document.createDocumentFragment();
     appendNode(fragment, h('div',
         'Hello ', h('strong', 'Bob'), '! ',
-        h('strong', count1.map(v => Math.round(v))), ' x ', h('strong', count2.map(v => Math.round(v))), ' = ', h('strong', mul.map(v => Math.round(v))), '. ',
+        h('strong', count1.map(v => v.toFixed(2))), ' x ', h('strong', count2.map(v => v.toFixed(2))), ' = ', h('strong', mul.map(v => v.toFixed(2))), '. ',
         h('p', 'Local time is ', h('strong', time.combineWith(tickTock).map(([date, tickTock]) => tickTock.value ? date.value.toLocaleTimeString() : date.value.toLocaleTimeString().replaceAll(':', ' ')))),
         h('p', 'Server time is ', remoteTime.map(rt => rt.toLocaleTimeString())),
         h('p', 'A local promise: ', new Promise<Node>(resolve => setTimeout(() => resolve(n('Hi!')), 2000))),
@@ -61,6 +61,9 @@ async function App() {
 
                 ctx.fillStyle = "#CC0000";
                 ctx.fillRect(x2, y2, 1, 1);
+
+                ctx.fillStyle = "#00CC00";
+                ctx.fillRect((x2 + x1) % canvas.width, (y1 + y2) / 2, 1, 1);
             })
 
             canvas.addEventListener('dispose', () => drawer.dispose());
