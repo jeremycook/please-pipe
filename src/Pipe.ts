@@ -1,40 +1,28 @@
-type PipeListener<T> = (origin: Pipe<T>) => void;
+export type SubscriptionToken = number;
 
 export interface Pipe<T> {
-    /** Returns the pipe's current value. */
-    get value(): T;
+    subscribe(listener: (source: Pipe<T>) => void): SubscriptionToken;
 
-    /** Subscribe to this pipe. Returns an unsubscribe token. */
-    subscribe(listener: PipeListener<T>): SubscriptionToken;
-
-    /** Unsubscribe with a token a call to subscribe returned. */
     unsubscribe(token: SubscriptionToken): void;
 
-    /** Unsubscribes listeners. Do not use a disposed object. The behavior of a disposed object is undefined. */
     dispose(): void;
 
-    combineWith<T1>(t1: Pipe<T1>): Pipe<[Pipe<T>, Pipe<T1>]>;
+    observe(...captures: ((value: T) => Pipe<any>)[]): Pipe<T>;
+
+    combineWith<T1>(t1: Pipe<T1>): Pipe<[Pipe<T>, Pipe<T1>, ...Pipe<any>[]]>;
     combineWith<T1, T2>(t1: Pipe<T1>, t2: Pipe<T2>): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>]>;
-    combineWith<T1, T2, T3>(t1: Pipe<T1>, t2: Pipe<T2>, t3: Pipe<T3>): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>, Pipe<T3>]>;
+    combineWith<T1, T2, T3>(t1: Pipe<T1>, t2: Pipe<T2>, t3: Pipe<T3>, ...rest: Pipe<any>[]): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>, Pipe<T3>]>;
 
     project<TEnd>(projection: (value: T) => TEnd): Pipe<TEnd>;
 }
 
-interface PipeBase<T> extends Pipe<T> {
-}
-
-export type SubscriptionToken = number;
-
-abstract class PipeBase<T> implements Pipe<T> {
+export abstract class Pipe<T> implements Pipe<T> {
     private _index = 0;
     private _listeners: ((source: Pipe<T>) => void)[] = [];
 
-    constructor() {
-    }
-
     abstract get value(): T;
 
-    protected notify() {
+    protected notify(): void {
         for (const listener of this._listeners) {
             (listener as (source: Pipe<T>) => void)(this);
         }
@@ -50,11 +38,11 @@ abstract class PipeBase<T> implements Pipe<T> {
         return token;
     }
 
-    unsubscribe(token: SubscriptionToken) {
+    unsubscribe(token: SubscriptionToken): void {
         delete this._listeners[token];
     }
 
-    dispose() {
+    dispose(): void {
         for (let i = 0; i < this._index; i++) {
             this.unsubscribe(i);
         }
@@ -65,11 +53,11 @@ abstract class PipeBase<T> implements Pipe<T> {
         return new ObservingPipe<T>(this, ...captures);
     }
 
-    combineWith<T1>(t1: Pipe<T1>): Pipe<[Pipe<T>, Pipe<T1>]>;
+    combineWith<T1>(t1: Pipe<T1>): Pipe<[Pipe<T>, Pipe<T1>, ...Pipe<any>[]]>;
     combineWith<T1, T2>(t1: Pipe<T1>, t2: Pipe<T2>): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>]>;
-    combineWith<T1, T2, T3>(t1: Pipe<T1>, t2: Pipe<T2>, t3: Pipe<T3>): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>, Pipe<T3>]>;
-    combineWith(...rest: Pipe<any>[]): Pipe<[Pipe<T>, ...Pipe<any>[]]> {
-        return new CombinedPipe(this, ...rest) as any;
+    combineWith<T1, T2, T3>(t1: Pipe<T1>, t2: Pipe<T2>, t3: Pipe<T3>, ...rest: Pipe<any>[]): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>, Pipe<T3>]>;
+    combineWith(...rest: Pipe<any>[]): any {
+        return new CombinedPipe(this as Pipe<T>, ...rest);
     }
 
     project<TEnd>(projection: (value: T) => TEnd): Pipe<TEnd> {
@@ -77,9 +65,7 @@ abstract class PipeBase<T> implements Pipe<T> {
     }
 }
 
-export const PipeConstructor = PipeBase;
-
-export class State<T> extends PipeBase<T> implements Pipe<T> {
+export class State<T> extends Pipe<T> {
     private _oldValue: T;
     private _value: T;
 
@@ -87,17 +73,6 @@ export class State<T> extends PipeBase<T> implements Pipe<T> {
         super();
         this._oldValue = value;
         this._value = value;
-    }
-
-    combineWith<T1>(t1: Pipe<T1>): Pipe<[Pipe<T>, Pipe<T1>]>;
-    combineWith<T1, T2>(t1: Pipe<T1>, t2: Pipe<T2>): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>]>;
-    combineWith<T1, T2, T3>(t1: Pipe<T1>, t2: Pipe<T2>, t3: Pipe<T3>): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>, Pipe<T3>]>;
-    combineWith(...rest: Pipe<any>[]): Pipe<[Pipe<T>, ...Pipe<any>[]]> {
-        return new CombinedPipe(this, ...rest) as any;
-    }
-
-    project<TEnd>(projection: (value: T) => TEnd): Pipe<TEnd> {
-        return new ProjectionPipe<T, TEnd>(this, projection);
     }
 
     get oldValue() {
@@ -140,7 +115,7 @@ export class StateCollection<TItem> extends State<TItem[]> implements PipeCollec
     }
 }
 
-export class FilteredPipeCollection<TItem> extends PipeBase<TItem[]> implements PipeCollection<TItem> {
+export class FilteredPipeCollection<TItem> extends Pipe<TItem[]> implements PipeCollection<TItem> {
     private _cached: boolean = false;
     private _cache?: TItem[] = undefined;
     private _tokens: { [token: SubscriptionToken]: { parentToken: SubscriptionToken, unsubscribers: (() => void)[] } } = {};
@@ -226,7 +201,7 @@ export class FilteredPipeCollection<TItem> extends PipeBase<TItem[]> implements 
     }
 }
 
-export class MappedPipeCollection<TItemIn, TItem> extends PipeBase<TItem[]> implements PipeCollection<TItem> {
+export class MappedPipeCollection<TItemIn, TItem> extends Pipe<TItem[]> implements PipeCollection<TItem> {
     private _cached: boolean = false;
     private _cache?: TItem[] = undefined;
     private _subscriptionInfo: { [token: SubscriptionToken]: { unsubscribe: () => void } } = {};
@@ -285,7 +260,7 @@ export class MappedPipeCollection<TItemIn, TItem> extends PipeBase<TItem[]> impl
     }
 }
 
-export class ProjectionPipe<TIn, T> extends PipeBase<T> implements Pipe<T> {
+export class ProjectionPipe<TIn, T> extends Pipe<T> implements Pipe<T> {
     private _cached: boolean = false;
     private _cache?: T;
     private _tokens: { [token: SubscriptionToken]: SubscriptionToken; } = {};
@@ -333,7 +308,7 @@ export class ProjectionPipe<TIn, T> extends PipeBase<T> implements Pipe<T> {
     }
 }
 
-export class CombinedPipe extends PipeBase<Pipe<any>[]> implements Pipe<Pipe<any>[]> {
+export class CombinedPipe extends Pipe<Pipe<any>[]> implements Pipe<Pipe<any>[]> {
     private _cached: boolean = false;
     private _cache?: any[];
     private _subscriptionInfo: { [token: SubscriptionToken]: { unsubscribeAll: () => void } } = {};
@@ -384,7 +359,7 @@ export class CombinedPipe extends PipeBase<Pipe<any>[]> implements Pipe<Pipe<any
     }
 }
 
-export class ObservingPipe<T> extends PipeBase<T> implements Pipe<T> {
+export class ObservingPipe<T> extends Pipe<T> implements Pipe<T> {
     private _tokens: { [token: SubscriptionToken]: { parentToken: SubscriptionToken, unsubscribers: (() => void)[] }; } = {};
     private _parent: Pipe<T>;
     private _captures: ((value: T) => Pipe<any>)[];
