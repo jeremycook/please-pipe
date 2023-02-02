@@ -1,4 +1,3 @@
-
 type PipeListener<T> = (origin: Pipe<T>) => void;
 
 export interface Pipe<T> {
@@ -36,12 +35,16 @@ abstract class PipeBase<T> implements Pipe<T> {
     abstract get value(): T;
 
     protected notify() {
-        for (const listener of Object.values(this._listeners)) {
+        for (const listener of this._listeners) {
             (listener as (source: Pipe<T>) => void)(this);
         }
     }
 
     subscribe(listener: (source: Pipe<T>) => void): SubscriptionToken {
+        if (this._listeners.includes(listener)) {
+            throw { message: 'The {listener} has already subscribed. Was this intentional?', listener };
+        }
+
         const token = this._index++;
         this._listeners[token] = listener;
         return token;
