@@ -1,27 +1,6 @@
-export type SubscriptionToken = number;
+export type UnsubscribeToken = number;
 
 type PipeArrayOrNever<T, TItem> = T extends Array<TItem> ? PipeArray<TItem> : never;
-// type PipeArrayOrNever<T> = T extends Array<any> ? PipeArray<T[number]> : never;
-
-// export interface Pipe<T> {
-//     subscribe(listener: (source: Pipe<T>) => void): SubscriptionToken;
-
-//     unsubscribe(token: SubscriptionToken): void;
-
-//     /** Cleans up this pipe to never be used again. */
-//     dispose(): void;
-
-//     /** Returns a pipe that monitors specific members for changes. */
-//     monitor(...monitoredPipes: ((value: T) => Pipe<any>)[]): Pipe<T>;
-
-//     /** Combine one or more pipes. */
-//     combineWith<T1>(t1: Pipe<T1>): Pipe<[Pipe<T>, Pipe<T1>]>;
-//     combineWith<T1, T2>(t1: Pipe<T1>, t2: Pipe<T2>): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>]>;
-//     combineWith<T1, T2, T3>(t1: Pipe<T1>, t2: Pipe<T2>, t3: Pipe<T3>, ...rest: Pipe<any>[]): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>, Pipe<T3>, ...Pipe<any>[]]>;
-
-//     /** Project one pipe into different shape. */
-//     project<TOut>(projection: (value: (T)) => TOut): Pipe<TOut>;
-// }
 
 export abstract class Pipe<T> implements Pipe<T> {
     private _index = 0;
@@ -35,7 +14,7 @@ export abstract class Pipe<T> implements Pipe<T> {
         }
     }
 
-    subscribe(listener: (source: Pipe<T>) => void): SubscriptionToken {
+    subscribe(listener: (source: Pipe<T>) => void): UnsubscribeToken {
         if (this._listeners.includes(listener)) {
             throw { message: 'The {listener} has already subscribed. Was this intentional?', listener };
         }
@@ -45,7 +24,7 @@ export abstract class Pipe<T> implements Pipe<T> {
         return token;
     }
 
-    unsubscribe(token: SubscriptionToken): void {
+    unsubscribe(token: UnsubscribeToken): void {
         delete this._listeners[token];
     }
 
@@ -64,11 +43,11 @@ export abstract class Pipe<T> implements Pipe<T> {
     combineWith<T1, T2>(t1: Pipe<T1>, t2: Pipe<T2>): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>]>;
     combineWith<T1, T2, T3>(t1: Pipe<T1>, t2: Pipe<T2>, t3: Pipe<T3>, ...rest: Pipe<any>[]): Pipe<[Pipe<T>, Pipe<T1>, Pipe<T2>, Pipe<T3>]>;
     combineWith(...rest: Pipe<any>[]): any {
-        return new CombinedPipe(this as Pipe<T>, ...rest);
+        return new PipeCombiner(this as Pipe<T>, ...rest);
     }
 
     project<TEnd>(projection: (value: T) => TEnd): Pipe<TEnd> {
-        return new ProjectionPipe<T, TEnd>(this, projection);
+        return new PipeProjection<T, TEnd>(this, projection);
     }
 
     // PipeArray members
@@ -134,7 +113,7 @@ export interface PipeArray<TItem> extends Pipe<TItem[]> {
 export class PipeArrayFilter<TItem> extends Pipe<TItem[]> implements PipeArray<TItem> {
     private _cached: boolean = false;
     private _cache?: TItem[] = undefined;
-    private _subscriptions: { [token: SubscriptionToken]: { unsubscribeParent: () => void, unsubscribeChildren: () => void } } = {};
+    private _subscriptions: { [token: UnsubscribeToken]: { unsubscribeParent: () => void, unsubscribeChildren: (() => void)[] } } = {};
     private _parent: Pipe<TItem[]>;
     private _predicate: (value: TItem) => Pipe<boolean>;
 
@@ -157,71 +136,64 @@ export class PipeArrayFilter<TItem> extends Pipe<TItem[]> implements PipeArray<T
     }
 
     protected notify() {
-        // Ensure the cache is cleared before notifying
+        // Reset cache before notifying
         this._cached = false;
         super.notify();
     }
 
-    subscribe(listener: (source: Pipe<TItem[]>) => void): SubscriptionToken {
+    subscribe(listener: (source: Pipe<TItem[]>) => void): UnsubscribeToken {
         const thisToken = super.subscribe(listener);
 
         const parentToken = this._parent.subscribe(_ => {
-            // When the parent changes that may mean that an item has been added or removed
-            // so we need to update our predicate subscriptions.
-            // We'll first unsubscribe, and then subscribe to items the parent has now.
-            const parentTokenInfo = this._subscriptions[thisToken];
-            parentTokenInfo.unsubscribeChildren();
-
-            const unsubscribers = this._parent.value
-                .map(item => this._predicate(item))
-                .map(pipe => {
-                    const subToken = pipe.subscribe(_ => this.notify());
-                    return () => pipe.unsubscribe(subToken);
-                });
-
-            parentTokenInfo.unsubscribeChildren = () => unsubscribers.forEach(x => x());
+            // Refresh subscriptions: If the parent changes its
+            // items may have been added or removed so we need
+            // to update our predicate subscriptions.
+            const subscription = this._subscriptions[thisToken];
+            subscription.unsubscribeChildren.forEach(x => x());
+            subscription.unsubscribeChildren = this._parent.value.map(item => {
+                const pipe = this._predicate(item);
+                const subToken = pipe.subscribe(_ => this.notify());
+                return pipe.unsubscribe.bind(pipe, subToken);
+            });
 
             this.notify();
         });
 
-        const unsubscribers = this._parent.value
-            .map(item => this._predicate(item))
-            .map(pipe => {
-                const subToken = pipe.subscribe(_ => this.notify());
-                return () => pipe.unsubscribe(subToken);
-            });
         this._subscriptions[thisToken] = {
             unsubscribeParent: () => this._parent.unsubscribe(parentToken),
-            unsubscribeChildren: () => unsubscribers.forEach(x => x()),
+            unsubscribeChildren: this._parent.value.map(item => {
+                const pipe = this._predicate(item);
+                const subToken = pipe.subscribe(_ => this.notify());
+                return pipe.unsubscribe.bind(pipe, subToken);
+            }),
         };
 
         return thisToken;
     }
 
-    unsubscribe(token: SubscriptionToken) {
-        const subscriptionInfo = this._subscriptions[token];
-        subscriptionInfo.unsubscribeChildren();
-        subscriptionInfo.unsubscribeParent();
+    unsubscribe(token: UnsubscribeToken) {
+        const sub = this._subscriptions[token];
+        sub.unsubscribeChildren.forEach(x => x());
+        sub.unsubscribeParent();
         super.unsubscribe(token);
     }
 }
 
-export class PipeArrayMap<TItemIn, TItem> extends Pipe<TItem[]> implements PipeArray<TItem> {
+export class PipeArrayMap<TItemIn, TItemOut> extends Pipe<TItemOut[]> implements PipeArray<TItemOut> {
     private _cached: boolean = false;
-    private _cache?: TItem[] = undefined;
-    private _subscriptionInfo: { [token: SubscriptionToken]: { unsubscribe: () => void } } = {};
+    private _cache?: TItemOut[] = undefined;
+    private _subscriptions: { [token: UnsubscribeToken]: { unsubscribeParent: () => void } } = {};
     private _parent: Pipe<TItemIn[]>;
-    private _projection: (value: TItemIn) => TItem;
+    private _projection: (value: TItemIn) => TItemOut;
 
     constructor(
         parent: Pipe<TItemIn[]>,
-        projection: (item: TItemIn) => TItem
+        projection: (item: TItemIn) => TItemOut
     ) {
         super();
         this._parent = parent;
         this._projection = projection;
     }
-
 
     get value() {
         if (!this._cached) {
@@ -237,40 +209,41 @@ export class PipeArrayMap<TItemIn, TItem> extends Pipe<TItem[]> implements PipeA
         super.notify();
     }
 
-    subscribe(listener: (source: Pipe<TItem[]>) => void): SubscriptionToken {
+    subscribe(listener: (source: Pipe<TItemOut[]>) => void): UnsubscribeToken {
         const thisToken = super.subscribe(listener);
 
         const parentToken = this._parent.subscribe(_ => this.notify());
-        this._subscriptionInfo[thisToken] = { unsubscribe: () => this._parent.unsubscribe(parentToken) };
+        this._subscriptions[thisToken] = {
+            unsubscribeParent: this._parent.unsubscribe.bind(this._parent, parentToken),
+        };
 
         return thisToken;
     }
 
-    unsubscribe(token: SubscriptionToken) {
-        const info = this._subscriptionInfo[token];
-        info.unsubscribe();
-
+    unsubscribe(token: UnsubscribeToken) {
+        const sub = this._subscriptions[token];
+        sub.unsubscribeParent();
         super.unsubscribe(token);
     }
 }
 
-export class ProjectionPipe<TIn, T> extends Pipe<T> implements Pipe<T> {
+export class PipeProjection<TIn, TOut> extends Pipe<TOut> implements Pipe<TOut> {
     private _cached: boolean = false;
-    private _cache?: T;
-    private _tokens: { [token: SubscriptionToken]: SubscriptionToken; } = {};
+    private _cache?: TOut;
+    private _subscriptions: { [token: UnsubscribeToken]: { unsubscribeParent: () => void } } = {};
     private _parent: Pipe<TIn>;
-    private _projection: (value: TIn) => T;
+    private _projection: (value: TIn) => TOut;
 
     constructor(
         parent: Pipe<TIn>,
-        projection: (value: TIn) => T
+        projection: (value: TIn) => TOut
     ) {
         super();
         this._parent = parent;
         this._projection = projection;
     }
 
-    get value(): T {
+    get value(): TOut {
         if (!this._cached) {
             this._cache = this._projection(this._parent.value);
             this._cached = true;
@@ -280,32 +253,31 @@ export class ProjectionPipe<TIn, T> extends Pipe<T> implements Pipe<T> {
     }
 
     protected notify() {
-        // Ensure the cache is cleared before notifying
+        // Reset cache before notifying
         this._cached = false;
         super.notify();
     }
 
-    subscribe(subscription: (source: Pipe<T>) => void) {
-        const token = super.subscribe(subscription);
+    subscribe(subscription: (source: Pipe<TOut>) => void) {
+        const thisToken = super.subscribe(subscription);
         const parentToken = this._parent.subscribe(_ => this.notify());
 
-        this._tokens[token] = parentToken;
+        this._subscriptions[thisToken] = {
+            unsubscribeParent: this._parent.unsubscribe.bind(this._parent, parentToken),
+        };
 
-        return token;
+        return thisToken;
     }
 
-    unsubscribe(token: SubscriptionToken) {
-        const parentToken = this._tokens[token];
-
-        this._parent.unsubscribe(parentToken);
+    unsubscribe(token: UnsubscribeToken) {
+        const sub = this._subscriptions[token];
+        sub.unsubscribeParent();
         super.unsubscribe(token);
     }
 }
 
-export class CombinedPipe extends Pipe<Pipe<any>[]> implements Pipe<Pipe<any>[]> {
-    private _cached: boolean = false;
-    private _cache?: any[];
-    private _subscriptionInfo: { [token: SubscriptionToken]: { unsubscribeAll: () => void } } = {};
+export class PipeCombiner extends Pipe<Pipe<any>[]> implements Pipe<Pipe<any>[]> {
+    private _subscriptions: { [token: UnsubscribeToken]: { unsubscribePipes: (() => void)[] } } = {};
     private _pipes: Pipe<any>[];
 
     constructor(
@@ -316,45 +288,31 @@ export class CombinedPipe extends Pipe<Pipe<any>[]> implements Pipe<Pipe<any>[]>
     }
 
     get value(): any[] {
-        if (!this._cached) {
-            this._cache = this._pipes;
-            this._cached = true;
-        }
-
-        return this._cache!;
-    }
-
-    protected notify() {
-        // Ensure the cache is cleared before notifying
-        this._cached = false;
-        super.notify();
+        return this._pipes;
     }
 
     subscribe(listener: (source: Pipe<Pipe<unknown>[]>) => void) {
         const thisToken = super.subscribe(listener);
 
-        const unsubscriberCalls = this._pipes
-            .map(p => {
-                const token = p.subscribe(_ => this.notify());
-                return () => p.unsubscribe(token);
-            });
-        this._subscriptionInfo[thisToken] = {
-            unsubscribeAll: () => unsubscriberCalls.forEach(x => x()),
+        this._subscriptions[thisToken] = {
+            unsubscribePipes: this._pipes.map(pipe => {
+                const token = pipe.subscribe(_ => this.notify());
+                return pipe.unsubscribe.bind(pipe, token);
+            }),
         };
 
         return thisToken;
     }
 
-    unsubscribe(token: SubscriptionToken) {
-        const info = this._subscriptionInfo[token];
-        info.unsubscribeAll();
-
+    unsubscribe(token: UnsubscribeToken) {
+        const sub = this._subscriptions[token];
+        sub.unsubscribePipes.forEach(x => x());
         super.unsubscribe(token);
     }
 }
 
 export class PipeMonitor<T> extends Pipe<T> implements Pipe<T> {
-    private _tokens: { [token: SubscriptionToken]: { parentToken: SubscriptionToken, unsubscribers: (() => void)[] }; } = {};
+    private _subscriptions: { [token: UnsubscribeToken]: { unsubscribeParent: () => void, unsubscribeChildren: (() => void)[] }; } = {};
     private _parent: Pipe<T>;
     private _monitoredPipes: ((value: T) => Pipe<any>)[];
 
@@ -371,56 +329,27 @@ export class PipeMonitor<T> extends Pipe<T> implements Pipe<T> {
         return this._parent.value;
     }
 
-    protected notify() {
-        super.notify();
-    }
-
-    subscribe(listener: (source: Pipe<T>) => void): SubscriptionToken {
+    subscribe(listener: (source: Pipe<T>) => void): UnsubscribeToken {
         const token = super.subscribe(listener);
 
-        const parentToken = this._parent.subscribe(parentPipe => {
-            // When the parent changes that may mean that an item or member has been added or removed
-            // so we need to update our predicate subscriptions.
-            // Unsubscribe and resubscribe to items the parent has now.
-            const tokenInfo = this._tokens[token];
-            tokenInfo.unsubscribers.forEach(unsubscribe => unsubscribe());
-            tokenInfo.unsubscribers = this._monitoredPipes
-                .map(capture => capture(parentPipe.value))
-                .map(x => {
-                    const subToken = x.subscribe(_ => this.notify());
-                    return () => x.unsubscribe(subToken);
-                });
+        const parentToken = this._parent.subscribe(_ => this.notify());
 
-            // Notify listeners.
-            this.notify();
-        });
-
-        this._tokens[token] = {
-            parentToken,
-            unsubscribers: this._monitoredPipes
-                .map(capture => capture(this._parent.value))
-                .map(x => {
-                    const subToken = x.subscribe(_ => this.notify());
-                    return () => x.unsubscribe(subToken);
-                }),
+        this._subscriptions[token] = {
+            unsubscribeParent: this._parent.unsubscribe.bind(this._parent, parentToken),
+            unsubscribeChildren: this._monitoredPipes.map(pipeSelector => {
+                const monitoredPipe = pipeSelector(this._parent.value);
+                const token = monitoredPipe.subscribe(_ => this.notify());
+                return monitoredPipe.unsubscribe.bind(monitoredPipe, token);
+            }),
         };
 
         return token;
     }
 
-    unsubscribe(token: SubscriptionToken) {
-        const parentToken = this._tokens[token];
-        this._parent.unsubscribe(parentToken.parentToken);
-        parentToken.unsubscribers.forEach(unsubscribe => unsubscribe());
-
+    unsubscribe(token: UnsubscribeToken) {
+        const sub = this._subscriptions[token];
+        sub.unsubscribeChildren.forEach(x => x());
+        sub.unsubscribeParent();
         super.unsubscribe(token);
-    }
-}
-
-// Utilities
-
-export namespace Pipe {
-    export function open<T>(pipeOrValue: (T | Pipe<T>)): T {
-        return pipeOrValue instanceof Pipe ? pipeOrValue.value : pipeOrValue;
     }
 }
