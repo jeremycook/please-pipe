@@ -64,6 +64,13 @@ export abstract class Pipe<T> implements Pipe<T> {
         return this;
     }
 
+    group<TItem, TKey>(this: PipeArrayOrNever<T, TItem>, expression: (value: TItem) => Pipe<TKey>): PipeArrayGroup<TItem, TKey> {
+        if (!Array.isArray(this.value)) {
+            throw 'The value must be an array.';
+        }
+        return new PipeArrayGroup(this, expression);
+    }
+
     map<TItemIn, TItemOut>(this: PipeArrayOrNever<T, TItemIn>, projection: (value: TItemIn) => TItemOut): PipeArray<TItemOut> {
         if (!Array.isArray(this.value)) {
             throw 'The value must be an array.';
@@ -189,6 +196,99 @@ export class PipeArrayFilter<TItem> extends Pipe<TItem[]> implements PipeArray<T
         this._parent = undefined!;
         this._predicate = undefined!;
     }
+}
+
+export class PipeArrayGroup<TItem, TKey> extends Pipe<[TKey, TItem[]][]> implements PipeArray<[TKey, TItem[]]> {
+    private _cached: boolean = false;
+    private _cache?: [TKey, TItem[]][];
+    private _parent: Pipe<TItem[]>;
+    private _expression: (value: TItem) => Pipe<TKey>;
+    private _unsubscribeParent: () => void;
+    private _unsubscribeChildren: { item: TItem, unsubscribe: (() => void) }[];
+
+    constructor(
+        parent: PipeArray<TItem>,
+        expression: (value: TItem) => Pipe<TKey>
+    ) {
+        super();
+        this._parent = parent;
+        this._expression = expression;
+
+        const parentToken = this._parent.subscribe(_ => {
+            // If the parent changed then items may have been added or removed
+            // so we need to update our subscriptions.
+
+            // Determine added and removed items.
+            const removedSubs = this._unsubscribeChildren
+                .filter(sub => !this._parent.value.some(item => item === sub.item));
+            removedSubs.forEach(sub => {
+                sub.unsubscribe();
+                const i = this._unsubscribeChildren.indexOf(sub);
+                this._unsubscribeChildren.splice(i, 1);
+            });
+
+            const addedItems = this._parent.value
+                .filter(item => !this._unsubscribeChildren.some(sub => sub.item === item));
+            const addedSubs = addedItems.map(item => {
+                const pipe = this._expression(item);
+                const itemToken = pipe.subscribe(_ => this.notify());
+                return { item, unsubscribe: pipe.unsubscribe.bind(pipe, itemToken) };
+            });
+            this._unsubscribeChildren = [...this._unsubscribeChildren, ...addedSubs];
+
+            this.notify();
+        });
+        this._unsubscribeParent = () => this._parent.unsubscribe(parentToken);
+
+        this._unsubscribeChildren = this._parent.value.map(item => {
+            const pipe = this._expression(item);
+            const itemToken = pipe.subscribe(_ => this.notify());
+            return { item, unsubscribe: pipe.unsubscribe.bind(pipe, itemToken) };
+        });
+    }
+
+    get value() {
+        if (!this._cached) {
+            const cache = [];
+            for (const item of groupBy(this._parent.value, x => this._expression(x).value)) {
+                cache.push(item);
+            }
+            this._cache = cache;
+            this._cached = true;
+        }
+        return this._cache!;
+    }
+
+    protected notify() {
+        // Invalidate the cache before notifying
+        this._cached = false;
+        super.notify();
+    }
+
+    dispose(): void {
+        super.dispose();
+        this._unsubscribeParent();
+        this._unsubscribeParent = undefined!;
+        this._unsubscribeChildren.forEach(x => x.unsubscribe());
+        this._unsubscribeChildren = undefined!;
+        this._cache = undefined;
+        this._parent = undefined!;
+        this._expression = undefined!;
+    }
+}
+
+function groupBy<TItem, TKey>(
+    array: TItem[],
+    keyGetter: (item: TItem) => TKey): Map<TKey, TItem[]> {
+
+    const map = new Map<TKey, TItem[]>();
+    array.forEach((item) => {
+        const key = keyGetter(item);
+        const collection = map.get(key);
+        if (!collection) map.set(key, [item]);
+        else collection.push(item);
+    });
+    return map;
 }
 
 export class PipeArrayMap<TItemIn, TItemOut> extends Pipe<TItemOut[]> implements PipeArray<TItemOut> {
