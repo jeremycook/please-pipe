@@ -4,7 +4,7 @@ type PipeArrayOrNever<T, TItem> = T extends Array<TItem> ? PipeArray<TItem> : ne
 
 export abstract class Pipe<T> implements Pipe<T> {
     private _listenerIndex = 0;
-    private _listeners: ((source: Pipe<T>) => void)[] = [];
+    private _listeners: (((source: Pipe<T>) => void) | undefined)[] = [];
 
     /** Returns this pipe's value. */
     abstract get value(): T;
@@ -12,7 +12,10 @@ export abstract class Pipe<T> implements Pipe<T> {
     /** Notify listeners of. */
     protected notify(): void {
         for (const listener of this._listeners) {
-            (listener as (source: Pipe<T>) => void)(this);
+            // `listener` will be undefined if it was unsubscribed
+            if (typeof listener === 'function') {
+                listener(this);
+            }
         }
     }
 
