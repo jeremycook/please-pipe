@@ -58,6 +58,11 @@ export abstract class Pipe<T> implements Pipe<T> {
         return new PipeProjection<T, TOut>(this, projection);
     }
 
+    selectMany<TOut>(projection: (value: T) => TOut): PipeArray<TOut> {
+        throw 'not implemented';
+        // return new PipeProjection<T, TOut>(this, projection);
+    }
+
     // PipeArray members
 
     asArray<TItem>(this: PipeArrayOrNever<T, TItem>): PipeArray<TItem> {
@@ -88,13 +93,42 @@ export abstract class Pipe<T> implements Pipe<T> {
         return new PipeArrayFilter(this, predicate) as PipeArray<TItem>;
     }
 
+    first<TItem>(this: PipeArrayOrNever<T, TItem>): Pipe<TItem> {
+        if (!Array.isArray(this.value)) {
+            throw 'The value must be an array.';
+        }
+        return new PipeArrayFirst(this) as Pipe<TItem>;
+    }
+
     [Symbol.iterator]<TItem>(this: PipeArrayOrNever<T, TItem>): IterableIterator<TItem> {
         if (!Array.isArray(this.value)) {
             throw 'The value must be an array.';
         }
         return this.value[Symbol.iterator]();
     }
+
+    // Statics
+
+    static bool(value: boolean) {
+        return value ? truePipe : falsePipe;
+    }
 }
+
+export class Fixed<T> extends Pipe<T> {
+    private _value: T;
+
+    constructor(value: T) {
+        super();
+        this._value = value;
+    }
+
+    get value() {
+        return this._value;
+    }
+}
+
+const truePipe: Fixed<boolean> = new Fixed(true);
+const falsePipe: Fixed<boolean> = new Fixed(false);
 
 export class State<T> extends Pipe<T> {
     private _oldValue: T;
@@ -198,6 +232,33 @@ export class PipeArrayFilter<TItem> extends Pipe<TItem[]> implements PipeArray<T
         this._cache = undefined;
         this._parent = undefined!;
         this._predicate = undefined!;
+    }
+}
+
+export class PipeArrayFirst<TItem> extends Pipe<TItem> {
+    private _parent: Pipe<TItem[]>;
+    private _unsubscribeParent: () => void;
+
+    constructor(
+        parent: PipeArray<TItem>
+    ) {
+        super();
+        this._parent = parent;
+
+        const parentToken = this._parent.subscribe(_ => this.notify());
+        this._unsubscribeParent = () => this._parent.unsubscribe(parentToken);
+    }
+
+    get value() {
+        // TODO: What if empty?
+        return this._parent.value[0];
+    }
+
+    dispose(): void {
+        super.dispose();
+        this._unsubscribeParent();
+        this._unsubscribeParent = undefined!;
+        this._parent = undefined!;
     }
 }
 
