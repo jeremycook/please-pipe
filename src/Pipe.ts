@@ -58,11 +58,6 @@ export abstract class Pipe<T> implements Pipe<T> {
         return new PipeProjection<T, TOut>(this, projection);
     }
 
-    selectMany<TOut>(projection: (value: T) => TOut): PipeArray<TOut> {
-        throw 'not implemented';
-        // return new PipeProjection<T, TOut>(this, projection);
-    }
-
     // PipeArray members
 
     asArray<TItem>(this: PipeArrayOrNever<T, TItem>): PipeArray<TItem> {
